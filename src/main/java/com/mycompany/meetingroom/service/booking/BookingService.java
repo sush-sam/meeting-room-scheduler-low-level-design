@@ -6,7 +6,7 @@ import com.mycompany.meetingroom.request.BookingResponse;
 import java.util.List;
 
 public interface BookingService {
-    List<BookingResponse> createBooking(BookingRequest request);
-    List<BookingResponse> getBookings(TimeSlot timeSlot);
-    BookingType getType();
+        List<BookingResponse> createBooking(BookingRequest request);
+        List<BookingResponse> getBookings(Long roomId, TimeSlot timeSlot);
+        BookingType getType();
 }

@@ -20,9 +20,9 @@ public class BookingFactory {
         return service.createBooking(request);
     }
 
-    public List<BookingResponse> getBookings(TimeSlot timeSlot) {
+    public List<BookingResponse> getBookings(Long roomId, TimeSlot timeSlot) {
         return bookingServices.stream()
-                .flatMap(service -> service.getBookings(timeSlot).stream())
+                .flatMap(service -> service.getBookings(roomId, timeSlot).stream())
                 .collect(Collectors.toList());
     }
 
