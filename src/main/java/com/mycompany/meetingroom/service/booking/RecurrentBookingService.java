@@ -1,21 +1,24 @@
 package com.mycompany.meetingroom.service.booking;
 
+import com.mycompany.meetingroom.exception.RoomNotAvailableException;
+import com.mycompany.meetingroom.model.*;
+import com.mycompany.meetingroom.repository.*;
+import com.mycompany.meetingroom.request.BookingRequest;
+import com.mycompany.meetingroom.request.BookingResponse;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.mycompany.meetingroom.model.*;
-import com.mycompany.meetingroom.repository.*;
-import com.mycompany.meetingroom.request.*;
-
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-public class RecurrentBookingService implements BookingService {
+public class RecurrentBookingService implements IBookingService {
 
     private final BookingRepository bookingRepository;
     private final UserRepository userRepository;
@@ -25,7 +28,7 @@ public class RecurrentBookingService implements BookingService {
 
     @Override
     @Transactional
-    public List<BookingResponse> createBooking(BookingRequest request) {
+    public List<BookingResponse> createBooking(BookingRequest request, BiPredicate<Long, TimeSlot> isRoomAvailable) {
         if (request.getRepeatInterval() <= 0) {
             throw new IllegalArgumentException("Invalid request type for recurrent booking");
         }
@@ -38,25 +41,28 @@ public class RecurrentBookingService implements BookingService {
         User organizer = userRepository.findById(request.getOrganizerId())
                 .orElseThrow(() -> new IllegalArgumentException("Organizer not found"));
 
+        // Check room availability for the initial time slot
+        TimeSlot initialTimeSlot = new TimeSlot(request.getStartTime(), request.getEndTime());
+        if (!isRoomAvailable.test(room.getId(), initialTimeSlot)) {
+            throw new RoomNotAvailableException("Room is not available for the initial time slot.");
+        }
+
         // Create parent booking entry
         Booking booking = new Booking();
         booking.setRoom(room);
         booking.setOrganizer(organizer);
-        booking.setTimeSlot(new TimeSlot(request.getStartTime(), request.getEndTime()));
+        booking.setTimeSlot(initialTimeSlot);
         booking.setRecurrenceType(request.getRecurrenceType());
         booking.setRepeatInterval(request.getRepeatInterval());
         booking.setEndDate(request.getEndDate());
-        
-        Booking savedBooking = bookingRepository.save(booking);
 
-        // Generate occurrences
-        List<RecurrentBooking> occurrences = generateOccurrences(savedBooking, request);
-        recurrentBookingRepository.saveAll(occurrences);
+        Booking savedBooking = bookingRepository.save(booking);
 
         // Save attendees
         saveAttendees(savedBooking, request.getAttendeeIds());
 
-        return occurrences.stream().map(this::convertToResponse).collect(Collectors.toList());
+        // Generate occurrences and collect responses
+        return generateOccurrences(savedBooking, request, isRoomAvailable);
     }
 
     @Override
@@ -66,8 +72,16 @@ public class RecurrentBookingService implements BookingService {
         );
 
         return occurrences.stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+                .map(recurrentBooking -> BookingResponse.builder()
+                        .bookingId(recurrentBooking.getBooking().getId())
+                        .roomId(recurrentBooking.getBooking().getRoom().getId())
+                        .organizerId(recurrentBooking.getBooking().getOrganizer().getId())
+                        .startTime(recurrentBooking.getTimeSlot().getStartTime())
+                        .endTime(recurrentBooking.getTimeSlot().getEndTime())
+                        .recurrenceId(recurrentBooking.getId())
+                        .status("SUCCESS")
+                        .build())
+                .toList();
     }
 
     @Override
@@ -75,8 +89,8 @@ public class RecurrentBookingService implements BookingService {
         return BookingType.RECURRENT;
     }
 
-    private List<RecurrentBooking> generateOccurrences(Booking booking, BookingRequest request) {
-        List<RecurrentBooking> occurrences = new ArrayList<>();
+    private List<BookingResponse> generateOccurrences(Booking booking, BookingRequest request, BiPredicate<Long, TimeSlot> isRoomAvailable) {
+        List<BookingResponse> bookingResponses = new ArrayList<>();
         LocalDateTime occurrenceTime = request.getStartTime();
         LocalDateTime endDate = request.getEndDate().atTime(request.getEndTime().toLocalTime());
 
@@ -85,13 +99,40 @@ public class RecurrentBookingService implements BookingService {
                     request.getEndTime().getMinute() - request.getStartTime().getMinute()
             ));
 
-            RecurrentBooking recurrentBooking = new RecurrentBooking();
-            recurrentBooking.setBooking(booking);
-            recurrentBooking.setTimeSlot(timeSlot);
-            occurrences.add(recurrentBooking);
+            BookingResponse response;
+            if (isRoomAvailable.test(booking.getRoom().getId(), timeSlot)) {
+                // Room is available, create the occurrence
+                RecurrentBooking recurrentBooking = new RecurrentBooking();
+                recurrentBooking.setBooking(booking);
+                recurrentBooking.setTimeSlot(timeSlot);
+                recurrentBookingRepository.save(recurrentBooking);
+
+                // Add SUCCESS response
+                response = BookingResponse.builder()
+                        .bookingId(booking.getId())
+                        .roomId(booking.getRoom().getId())
+                        .organizerId(booking.getOrganizer().getId())
+                        .startTime(timeSlot.getStartTime())
+                        .endTime(timeSlot.getEndTime())
+                        .recurrenceId(recurrentBooking.getId())
+                        .status("SUCCESS")
+                        .build();
+            } else {
+                // Room is not available, add FAILURE response
+                response = BookingResponse.builder()
+                        .bookingId(booking.getId())
+                        .roomId(booking.getRoom().getId())
+                        .organizerId(booking.getOrganizer().getId())
+                        .startTime(timeSlot.getStartTime())
+                        .endTime(timeSlot.getEndTime())
+                        .status("FAILURE")
+                        .build();
+            }
+
+            bookingResponses.add(response);
             occurrenceTime = getNextOccurrence(occurrenceTime, request);
         }
-        return occurrences;
+        return bookingResponses;
     }
 
     private LocalDateTime getNextOccurrence(LocalDateTime current, BookingRequest request) {
@@ -120,16 +161,5 @@ public class RecurrentBookingService implements BookingService {
                 .map(attendee -> new BookingAttendee(new BookingAttendeeId(booking.getId(), attendee.getId()), booking, attendee))
                 .collect(Collectors.toList());
         bookingAttendeeRepository.saveAll(bookingAttendees);
-    }
-
-    private BookingResponse convertToResponse(RecurrentBooking recurrentBooking) {
-        return BookingResponse.builder()
-                .bookingId(recurrentBooking.getBooking().getId())
-                .roomId(recurrentBooking.getBooking().getRoom().getId())
-                .organizerId(recurrentBooking.getBooking().getOrganizer().getId())
-                .startTime(recurrentBooking.getTimeSlot().getStartTime())
-                .endTime(recurrentBooking.getTimeSlot().getEndTime())
-                .recurrenceId(recurrentBooking.getId())
-                .build();
     }
 }

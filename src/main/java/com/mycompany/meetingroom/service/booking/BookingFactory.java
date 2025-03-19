@@ -2,36 +2,22 @@ package com.mycompany.meetingroom.service.booking;
 
 import com.mycompany.meetingroom.request.BookingRequest;
 import com.mycompany.meetingroom.request.BookingResponse;
-import com.mycompany.meetingroom.model.TimeSlot;
+import com.mycompany.meetingroom.service.availability.AvailabilityService;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class BookingFactory {
 
-    private final List<BookingService> bookingServices;  // Injected services
+    private final BookingServiceRegistry bookingServiceRegistry;
+    private final AvailabilityService availabilityService;
 
     public List<BookingResponse> createBooking(BookingRequest request) {
-        BookingService service = getBookingService(request);
-        return service.createBooking(request);
-    }
-
-    public List<BookingResponse> getBookings(Long roomId, TimeSlot timeSlot) {
-        return bookingServices.stream()
-                .flatMap(service -> service.getBookings(roomId, timeSlot).stream())
-                .collect(Collectors.toList());
-    }
-
-    private BookingService getBookingService(BookingRequest request) {
-        BookingType type = (request.getRepeatInterval() != null) ? BookingType.RECURRENT : BookingType.SINGLE;
-        return bookingServices.stream()
-                .filter(service -> service.getType() == type)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No service found for type: " + type));
+        IBookingService service = bookingServiceRegistry.getBookingService(request);
+        return service.createBooking(request, availabilityService::isRoomAvailable);
     }
 }
-

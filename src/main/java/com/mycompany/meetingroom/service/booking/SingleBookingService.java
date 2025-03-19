@@ -1,28 +1,22 @@
 package com.mycompany.meetingroom.service.booking;
 
+import com.mycompany.meetingroom.exception.RoomNotAvailableException;
+import com.mycompany.meetingroom.model.*;
+import com.mycompany.meetingroom.repository.*;
+import com.mycompany.meetingroom.request.BookingRequest;
+import com.mycompany.meetingroom.request.BookingResponse;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.mycompany.meetingroom.model.Booking;
-import com.mycompany.meetingroom.model.BookingAttendee;
-import com.mycompany.meetingroom.model.BookingAttendeeId;
-import com.mycompany.meetingroom.model.Room;
-import com.mycompany.meetingroom.model.TimeSlot;
-import com.mycompany.meetingroom.model.User;
-import com.mycompany.meetingroom.repository.BookingRepository;
-import com.mycompany.meetingroom.repository.BookingAttendeeRepository;
-import com.mycompany.meetingroom.repository.RoomRepository;
-import com.mycompany.meetingroom.repository.UserRepository;
-import com.mycompany.meetingroom.request.BookingRequest;
-import com.mycompany.meetingroom.request.BookingResponse;
-
 import java.util.List;
+import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-public class SingleBookingService implements BookingService {
+public class SingleBookingService implements IBookingService {
 
     private final BookingRepository bookingRepository;
     private final UserRepository userRepository;
@@ -31,7 +25,7 @@ public class SingleBookingService implements BookingService {
 
     @Override
     @Transactional
-    public List<BookingResponse> createBooking(BookingRequest request) {
+    public List<BookingResponse> createBooking(BookingRequest request, BiPredicate<Long, TimeSlot> isRoomAvailable) {
         // Validate room exists
         Room room = roomRepository.findById(request.getRoomId())
                 .orElseThrow(() -> new IllegalArgumentException("Room not found"));
@@ -40,11 +34,16 @@ public class SingleBookingService implements BookingService {
         User organizer = userRepository.findById(request.getOrganizerId())
                 .orElseThrow(() -> new IllegalArgumentException("Organizer not found"));
 
+        // Check room availability
+        TimeSlot timeSlot = new TimeSlot(request.getStartTime(), request.getEndTime());
+        if (!isRoomAvailable.test(room.getId(), timeSlot)) {
+            throw new RoomNotAvailableException("Room is not available for the given time slot.");
+        }
+
         // Create and save the booking
         Booking booking = new Booking();
         booking.setRoom(room);
         booking.setOrganizer(organizer);
-        TimeSlot timeSlot = new TimeSlot(request.getStartTime(), request.getEndTime());
         booking.setTimeSlot(timeSlot);
 
         Booking savedBooking = bookingRepository.save(booking);

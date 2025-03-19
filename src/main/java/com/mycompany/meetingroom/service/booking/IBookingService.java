@@ -4,9 +4,11 @@ import com.mycompany.meetingroom.model.TimeSlot;
 import com.mycompany.meetingroom.request.BookingRequest;
 import com.mycompany.meetingroom.request.BookingResponse;
 import java.util.List;
+import java.util.function.BiPredicate;
 
-public interface BookingService {
-        List<BookingResponse> createBooking(BookingRequest request);
-        List<BookingResponse> getBookings(Long roomId, TimeSlot timeSlot);
+
+public interface IBookingService {
+        List<BookingResponse> createBooking(BookingRequest request, BiPredicate<Long, TimeSlot> isRoomAvailable);
+        public List<BookingResponse> getBookings(Long roomId, TimeSlot timeSlot);
         BookingType getType();
 }

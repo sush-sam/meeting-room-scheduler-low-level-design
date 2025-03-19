@@ -17,5 +17,5 @@ public class BookingResponse {
     private Long roomId;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
+    private String status;  // FAILED or SUCCESS
 }
-
