@@ -5,6 +5,8 @@ import lombok.*;
 
 import java.time.LocalDate;
 
+import com.mycompany.meetingroom.util.RecurrenceTypeConverter;
+
 @Entity
 @Table(name = "bookings")
 @Getter
@@ -29,7 +31,7 @@ public class Booking {
     @Embedded
     private TimeSlot timeSlot;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = RecurrenceTypeConverter.class)
     @Column(name = "recurrence_type")
     private RecurrenceType recurrenceType;
 
